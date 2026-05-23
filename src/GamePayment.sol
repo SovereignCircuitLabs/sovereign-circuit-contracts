@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {
+    SafeERC20
+} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 contract GamePayment {
-    mapping(address => uint256) public balances; // 记录每个用户存入合约的原生 USDC 数量
+    using SafeERC20 for IERC20;
+
+    IERC20 public immutable usdc;
+    address public owner;
+
+    mapping(address => uint256) public balances; // 记录每个用户存入合约的 USDC 数量（6 decimals 最小单位）
 
     event PlayerPaid(
         address indexed from,
@@ -12,6 +22,29 @@ contract GamePayment {
     );
     event Deposited(address indexed from, uint256 amount);
     event Withdrawn(address indexed to, uint256 amount);
+    event OwnershipTransferred(
+        address indexed previousOwner,
+        address indexed newOwner
+    );
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
+    constructor(address _usdc) {
+        require(_usdc != address(0), "Invalid USDC address");
+        usdc = IERC20(_usdc);
+        owner = msg.sender;
+        emit OwnershipTransferred(address(0), msg.sender);
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Invalid new owner");
+        address old = owner;
+        owner = newOwner;
+        emit OwnershipTransferred(old, newOwner);
+    }
 
     function payPlayer(
         address to,
@@ -24,18 +57,18 @@ contract GamePayment {
 
         balances[msg.sender] -= amount;
 
-        (bool success, ) = to.call{value: amount}("");
-        require(success, "Transfer failed");
+        usdc.safeTransfer(to, amount);
 
         emit PlayerPaid(msg.sender, to, amount, reason);
     }
 
-    function deposit() external payable {
-        require(msg.value > 0, "Invalid amount");
+    function deposit(uint256 amount) external {
+        require(amount > 0, "Invalid amount");
 
-        balances[msg.sender] += msg.value;
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        balances[msg.sender] += amount;
 
-        emit Deposited(msg.sender, msg.value);
+        emit Deposited(msg.sender, amount);
     }
 
     function withdraw(uint256 amount) external {
@@ -44,8 +77,7 @@ contract GamePayment {
 
         balances[msg.sender] -= amount;
 
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "Transfer failed");
+        usdc.safeTransfer(msg.sender, amount);
 
         emit Withdrawn(msg.sender, amount);
     }
@@ -55,22 +87,14 @@ contract GamePayment {
     }
 
     function getContractBalance() external view returns (uint256) {
-        return address(this).balance;
+        return usdc.balanceOf(address(this));
     }
 
     receive() external payable {
-        require(msg.value > 0, "Invalid amount");
-
-        balances[msg.sender] += msg.value;
-
-        emit Deposited(msg.sender, msg.value);
+        revert("Native token not accepted");
     }
 
     fallback() external payable {
-        require(msg.value > 0, "Invalid amount");
-
-        balances[msg.sender] += msg.value;
-
-        emit Deposited(msg.sender, msg.value);
+        revert("Native token not accepted");
     }
 }

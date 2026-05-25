@@ -9,14 +9,25 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 ///         between each other and with players. Item IDs are fixed at deploy
 ///         time so the Unity client can map id -> sprite/effect statically.
 contract GameItems is ERC1155, Ownable {
+    // ERC1155 does not require name/symbol in the standard,
+    // but wallets (e.g. MetaMask), marketplaces (e.g. OpenSea),
+    // and block explorers commonly read these fields for display purposes,
+    // so we expose them manually.
+    string public constant name   = "Arc NPC Items";
+    string public constant symbol = "ANPCITEM";
+
     uint256 public constant MARKET_INTEL    = 1; // 市场情报 (consumable)
     uint256 public constant ENERGY_PACK     = 2; // 行为/算力能量
     uint256 public constant ACCESS_PASS     = 3; // 区域 / 服务通行证
     uint256 public constant RISK_REPORT     = 4; // 风控报告
     uint256 public constant SERVICE_VOUCHER = 5; // 服务券（可由 NPC 之间履约）
 
-    mapping(uint256 => string)  private _names;
-    mapping(address => bool)    public isMinter;
+    /// @notice Collection-level metadata URI used by marketplaces such as OpenSea
+    /// to display the collection cover image, description, and external links.
+    string public contractURI;
+
+    mapping(uint256 => string) private _names;
+    mapping(address => bool)   public isMinter;
 
     event MinterUpdated(address indexed minter, bool allowed);
 
@@ -49,6 +60,10 @@ contract GameItems is ERC1155, Ownable {
 
     function setUri(string calldata newUri) external onlyOwner {
         _setURI(newUri);
+    }
+
+    function setContractURI(string calldata newContractURI) external onlyOwner {
+        contractURI = newContractURI;
     }
 
     // ---------- Mint ----------

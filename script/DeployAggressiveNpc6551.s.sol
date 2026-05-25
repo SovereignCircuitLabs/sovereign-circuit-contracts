@@ -90,7 +90,8 @@ contract DeployNpc6551 is Script {
             portfolio: portfolio
         });
         (uint256 tokenId, address tba) = manager.mintNpcAndAccount(deployer, data);
-        manager.mintItemToNpcTba(tokenId, items.ACCESS_PASS(), 1);
+        manager.mintItemToNpcTba(tokenId, items.MARKET_INTEL(), 1);
+        manager.mintItemToNpcTba(tokenId, items.ENERGY_PACK(), 1);
 
         vm.stopBroadcast();
 

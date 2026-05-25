@@ -60,6 +60,16 @@ contract NpcCharacter is ERC721URIStorage, Ownable {
     mapping(uint256 => NpcData) private _npcData;
     mapping(address => bool) public isMinter;
 
+    // ---------- x402 Payment Wallet Binding ----------
+    // Each NPC may bind an off-chain-controlled EOA used ONLY for x402 /
+    // EIP-3009 payment signing. This wallet is NOT the TBA, NOT the NFT, and
+    // is NOT derived from either — it is an operational payment account whose
+    // private key lives in the off-chain x402 service. On NFT transfer the
+    // binding is auto-revoked (wallet cleared, version bumped) so the old
+    // operator's key cannot continue authorizing payments under the new owner.
+    mapping(uint256 => address) public npcPaymentWallet;
+    mapping(uint256 => uint64)  public npcPaymentVersion;
+
     // ---------- Events ----------
     event NpcMinted(
         uint256 indexed tokenId,
@@ -79,6 +89,35 @@ contract NpcCharacter is ERC721URIStorage, Ownable {
     );
     event MinterUpdated(address indexed minter, bool allowed);
 
+    /// @notice Emitted when an NFT owner binds (or re-binds / rotates) the
+    ///         x402 payment wallet for an NPC. Does NOT bump version — version
+    ///         tracks custody changes only. Off-chain services should treat
+    ///         this event as authoritative for the current payment address.
+    event NpcPaymentWalletBound(
+        uint256 indexed tokenId,
+        address indexed paymentWallet,
+        address indexed boundBy,
+        uint64 version
+    );
+
+    /// @notice Emitted on explicit owner-initiated clear (no version bump).
+    event NpcPaymentWalletCleared(
+        uint256 indexed tokenId,
+        address indexed previousWallet,
+        address indexed clearedBy,
+        uint64 version
+    );
+
+    /// @notice Emitted on every NFT transfer / burn, regardless of whether a
+    ///         wallet was bound. The version monotonically increments so
+    ///         off-chain caches can detect stale state without joining against
+    ///         ERC721 Transfer events.
+    event NpcPaymentWalletReset(
+        uint256 indexed tokenId,
+        address indexed previousWallet,
+        uint64 newVersion
+    );
+
     // ---------- Errors ----------
     error NotMinter();
     error NotNftOwner();
@@ -87,6 +126,8 @@ contract NpcCharacter is ERC721URIStorage, Ownable {
     error InvalidTradeRange();
     error InvalidIntervals();
     error TokenDoesNotExist();
+    error InvalidPaymentWallet();
+    error PaymentWalletUnchanged();
 
     modifier onlyMinter() {
         if (!isMinter[msg.sender]) revert NotMinter();
@@ -166,6 +207,66 @@ contract NpcCharacter is ERC721URIStorage, Ownable {
         _setTokenURI(tokenId, uri);
     }
 
+    // ---------- Payment Wallet (x402 operator key) ----------
+
+    /// @notice Bind / rotate the off-chain payment wallet for this NPC.
+    /// @dev    The current NFT owner is the only authority. The wallet is an
+    ///         EOA whose private key lives in the off-chain x402 service and
+    ///         is used to sign EIP-3009 transferWithAuthorization payloads.
+    ///         Re-binding is allowed (rotation); to fully revoke, call
+    ///         `clearPaymentWallet`. Version is NOT incremented here — version
+    ///         tracks NFT custody, not operator key churn.
+    function bindPaymentWallet(uint256 tokenId, address wallet) external {
+        address holder = _ownerOf(tokenId);
+        if (holder == address(0)) revert TokenDoesNotExist();
+        if (msg.sender != holder) revert NotNftOwner();
+        if (wallet == address(0)) revert InvalidPaymentWallet();
+        if (npcPaymentWallet[tokenId] == wallet) revert PaymentWalletUnchanged();
+
+        npcPaymentWallet[tokenId] = wallet;
+        emit NpcPaymentWalletBound(tokenId, wallet, holder, npcPaymentVersion[tokenId]);
+    }
+
+    /// @notice Explicit owner-side revoke. Off-chain service should observe
+    ///         the cleared address and refuse to sign further x402 payments.
+    function clearPaymentWallet(uint256 tokenId) external {
+        address holder = _ownerOf(tokenId);
+        if (holder == address(0)) revert TokenDoesNotExist();
+        if (msg.sender != holder) revert NotNftOwner();
+
+        address prev = npcPaymentWallet[tokenId];
+        if (prev == address(0)) revert PaymentWalletUnchanged();
+
+        delete npcPaymentWallet[tokenId];
+        emit NpcPaymentWalletCleared(tokenId, prev, holder, npcPaymentVersion[tokenId]);
+    }
+
+    // ---------- ERC721 lifecycle hook ----------
+
+    /// @dev OZ v5 unifies mint / transfer / burn into `_update`.
+    /// When the NFT is transferred or burned:
+    /// Clear the bound x402 payment wallet;
+    /// Increment the version to invalidate old signatures.
+    function _update(address to, uint256 tokenId, address auth)
+        internal
+        override
+        returns (address from)
+    {
+        from = super._update(to, tokenId, auth);
+
+        if (from != address(0)) {
+            address prev = npcPaymentWallet[tokenId];
+            uint64 newVersion;
+            unchecked { newVersion = npcPaymentVersion[tokenId] + 1; }
+            npcPaymentVersion[tokenId] = newVersion;
+
+            if (prev != address(0)) {
+                delete npcPaymentWallet[tokenId];
+            }
+            emit NpcPaymentWalletReset(tokenId, prev, newVersion);
+        }
+    }
+
     // ---------- Views ----------
     function getNpc(uint256 tokenId) external view returns (NpcData memory) {
         if (_ownerOf(tokenId) == address(0)) revert TokenDoesNotExist();
@@ -183,6 +284,18 @@ contract NpcCharacter is ERC721URIStorage, Ownable {
 
     function exists(uint256 tokenId) external view returns (bool) {
         return _ownerOf(tokenId) != address(0);
+    }
+
+    /// @notice Atomic (wallet, version) read for off-chain x402 verification.
+    ///         Off-chain check:
+    ///           ecrecover(derive(privKey)) == wallet  &&  version == cachedVersion
+    function getPaymentBinding(uint256 tokenId)
+        external
+        view
+        returns (address wallet, uint64 version)
+    {
+        if (_ownerOf(tokenId) == address(0)) revert TokenDoesNotExist();
+        return (npcPaymentWallet[tokenId], npcPaymentVersion[tokenId]);
     }
 
     // ---------- Internal ----------

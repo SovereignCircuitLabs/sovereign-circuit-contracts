@@ -62,6 +62,21 @@ contract GamePayment {
         emit PlayerPaid(msg.sender, to, amount, reason);
     }
 
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount,
+        string calldata reason
+    ) external {
+        require(from != address(0), "Invalid sender");
+        require(to != address(0), "Invalid receiver");
+        require(amount > 0, "Invalid amount");
+
+        usdc.safeTransferFrom(from, to, amount);
+
+        emit PlayerPaid(from, to, amount, reason);
+    }
+
     function deposit(uint256 amount) external {
         require(amount > 0, "Invalid amount");
 

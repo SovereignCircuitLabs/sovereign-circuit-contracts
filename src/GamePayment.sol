@@ -200,6 +200,7 @@ contract GamePayment is ERC1155Holder {
             "Insufficient pool liquidity"
         );
 
+        // msg.sender == TBA
         items.safeTransferFrom(msg.sender, address(this), id, 1, "");
 
         circulatingSupply[id] -= 1;
@@ -219,7 +220,7 @@ contract GamePayment is ERC1155Holder {
     ///         so the contract always remains fully solvent.
     function getSellPrice(uint256 id) public view returns (uint256) {
         uint256 supply = circulatingSupply[id];
-        if (supply == 0 || activeTypeCount == 0) return 0;
+        if (supply == 0 || activeTypeCount == 0) return 100000;
         return usdc.balanceOf(address(this)) / (activeTypeCount * supply);
     }
 

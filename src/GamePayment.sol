@@ -55,7 +55,14 @@ interface IGatewayWallet {
 contract GamePayment is ERC1155Holder {
     using SafeERC20 for IERC20;
 
-    uint256 public constant MINT_PRICE = 100_000; // 0.10 USDC (6 decimals)
+    // Lightweight dynamic AMM pricing (bonding curve, USDC has 6 decimals):
+    //   buyPrice(id)  = BASELINE_PRICE + circulatingSupply[id] * PRICE_SLOPE
+    //   sellPrice(id) = buyPrice(id) * SELL_SPREAD_BPS / BPS_DENOMINATOR
+    uint256 public constant BASELINE_PRICE = 100_000; // 0.10 USDC: floor price when circulatingSupply == 0
+    uint256 public constant PRICE_SLOPE = 5_000; // 0.005 USDC per unit of circulating supply
+    uint256 public constant SELL_SPREAD_BPS = 9_500; // sell at 95% of buy price (5% spread)
+    uint256 public constant BPS_DENOMINATOR = 10_000;
+
     uint256 public constant NUM_TYPES = 5;
 
     IERC20 public immutable usdc;
@@ -148,14 +155,17 @@ contract GamePayment is ERC1155Holder {
 
     // ----------------------------- Loot Draw / Buyback -----------------------------
 
-    /// @notice Pays MINT_PRICE USDC (caller must approve this contract first)
-    ///         to randomly receive one of the 5 NFT types.
-    ///         Returns the actual minted token id.
-    ///         NOT via x402!
-    function mintRandom() external returns (uint256 id) {
-        usdc.safeTransferFrom(msg.sender, address(this), MINT_PRICE);
-
+    /// @notice Rolls a random NFT type and charges the caller the current
+    ///         bonding-curve buy price for that id.
+    function mintRandom(
+        uint256 maxPriceAllowed
+    ) external returns (uint256 id) {
         id = _randomItemId();
+
+        uint256 price = getBuyPrice(id);
+        require(price <= maxPriceAllowed, "Price exceeds max allowed");
+
+        usdc.safeTransferFrom(msg.sender, address(this), price);
 
         if (circulatingSupply[id] == 0) {
             activeTypeCount += 1;
@@ -164,7 +174,7 @@ contract GamePayment is ERC1155Holder {
 
         items.mint(msg.sender, id, 1, "");
 
-        emit ItemMinted(msg.sender, id, MINT_PRICE);
+        emit ItemMinted(msg.sender, id, price);
     }
 
     /// @notice Called by the trusted x402 relayer(server) after payment is verified.
@@ -183,7 +193,38 @@ contract GamePayment is ERC1155Holder {
 
         items.mint(to, id, 1, "");
 
-        emit ItemMinted(to, id, MINT_PRICE);
+        emit ItemMinted(to, id, BASELINE_PRICE);
+    }
+
+    /// @notice Called by the trusted x402 relayer(server) to mint a SPECIFIC
+    ///         itemId to `to` after the off-chain x402 payment has been
+    ///         verified and settled into the gateway.
+    ///         Server-side flow:
+    ///           1. read getBuyPrice(id) from chain
+    ///           2. build an x402 payment requirement for that amount
+    ///           3. verify & settle the user's USDC payment off-chain
+    ///           4. call buyItemX402(to, id, paidAmount, maxPriceAllowed)
+    function buyItemX402(
+        address to,
+        uint256 id,
+        uint256 paidAmount,
+        uint256 maxPriceAllowed
+    ) external onlyOwner returns (uint256 price) {
+        require(to != address(0), "Invalid receiver");
+        require(_isManagedId(id), "Invalid id");
+
+        price = getBuyPrice(id);
+        require(price <= maxPriceAllowed, "Price exceeds max allowed");
+        require(paidAmount >= price, "Paid amount below current price");
+
+        if (circulatingSupply[id] == 0) {
+            activeTypeCount += 1;
+        }
+        circulatingSupply[id] += 1;
+
+        items.mint(to, id, 1, "");
+
+        emit ItemMinted(to, id, price);
     }
 
     /// @notice Sells one NFT back to the contract.
@@ -213,15 +254,28 @@ contract GamePayment is ERC1155Holder {
         emit ItemSold(msg.sender, id, price);
     }
 
-    /// @notice Current buyback price for each `id`.
-    ///         Formula:
-    ///         price = poolBalance / (activeTypeCount * circulatingSupply[id])
-    ///         Ensures that sum_over_types(supply * price) == poolBalance,
-    ///         so the contract always remains fully solvent.
+    /// @notice Current buy price for `id` on the bonding curve.
+    ///         price grows linearly with circulating supply, so more popular
+    ///         items become more expensive — the dynamic AMM-style behavior.
+    function getBuyPrice(uint256 id) public view returns (uint256) {
+        return BASELINE_PRICE + circulatingSupply[id] * PRICE_SLOPE;
+    }
+
+    /// @notice Buyback price for `id`. Fixed fraction (SELL_SPREAD_BPS) of the
+    ///         live buy price — the spread is what keeps round-trip arbitrage
+    ///         unprofitable for the chosen BASELINE/SLOPE configuration.
     function getSellPrice(uint256 id) public view returns (uint256) {
-        uint256 supply = circulatingSupply[id];
-        if (supply == 0 || activeTypeCount == 0) return 100000;
-        return usdc.balanceOf(address(this)) / (activeTypeCount * supply);
+        return (getBuyPrice(id) * SELL_SPREAD_BPS) / BPS_DENOMINATOR;
+    }
+
+    function getAllBuyPrices()
+        external
+        view
+        returns (uint256[NUM_TYPES] memory prices)
+    {
+        for (uint256 i = 0; i < NUM_TYPES; i++) {
+            prices[i] = getBuyPrice(itemIds[i]);
+        }
     }
 
     function getAllSellPrices()
@@ -242,10 +296,6 @@ contract GamePayment is ERC1155Holder {
         return itemIds;
     }
 
-    /// @dev Note: uses pseudo-randomness based on block.prevrandao —
-    ///      sufficient for low-value loot draws, but theoretically influenceable
-    ///      by validators/miners. If high-value drops are introduced in the future,
-    ///      consider replacing this with Chainlink VRF or a commit-reveal scheme.
     function _randomItemId() private returns (uint256) {
         _nonce += 1;
         uint256 idx = uint256(

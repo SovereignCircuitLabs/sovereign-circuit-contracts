@@ -9,6 +9,7 @@ import {Npc6551Manager} from "../src/npc/Npc6551Manager.sol";
 import {ERC6551Registry} from "../src/erc6551/ERC6551Registry.sol";
 import {ERC6551Account} from "../src/erc6551/ERC6551Account.sol";
 import {IERC6551Registry} from "../src/erc6551/interfaces/IERC6551Registry.sol";
+import {GamePayment} from "../src/GamePayment.sol";
 
 contract DeployNpc6551 is Script {
     function run() external {
@@ -136,6 +137,18 @@ contract DeployNpc6551 is Script {
         manager.mintItemToNpcTba(conservativeTokenId, items.ENERGY_PACK(), 1);
         manager.mintItemToNpcTba(conservativeTokenId, items.MARKET_INTEL(), 1);
 
+        // GamePayment Contract
+        address usdc = vm.envAddress("USDC_ADDRESS");
+        address gatewayAddr = vm.envAddress("GATEWAY_ADDRESS");
+        GamePayment payment = new GamePayment(
+            usdc,
+            address(items),
+            gatewayAddr,
+            address(manager)
+        );
+        // GamePayment mints items on buy/draw, so it needs minter rights.
+        items.setMinter(address(payment), true);
+
         vm.stopBroadcast();
 
         console2.log("---------- Arc NPC Deployment ----------");
@@ -145,6 +158,9 @@ contract DeployNpc6551 is Script {
         console2.log("ERC6551 Account impl :", address(accountImpl));
         console2.log("GameItems ERC1155    :", address(items));
         console2.log("Npc6551Manager       :", address(manager));
+        console2.log("GamePayment          :", address(payment));
+        console2.log("USDC                 :", usdc);
+        console2.log("Gateway Wallet       :", gatewayAddr);
         console2.log("");
         console2.log("Aggressive   tokenId :", aggressiveTokenId);
         console2.log("Aggressive   TBA     :", aggressiveTba);

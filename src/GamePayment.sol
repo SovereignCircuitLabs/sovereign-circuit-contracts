@@ -9,6 +9,7 @@ import {
     ERC1155Holder
 } from "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import {GameItems} from "./npc/GameItems.sol";
+import {Npc6551Manager} from "./npc/Npc6551Manager.sol";
 
 interface IGatewayWallet {
     function deposit(address token, uint256 value) external;
@@ -70,6 +71,7 @@ contract GamePayment is ERC1155Holder {
 
     address public owner;
     IGatewayWallet public gateway; // Circle Gateway Wallet
+    Npc6551Manager public manager; // resolves NPC tokenId -> ERC-6551 TBA address
 
     // NFT token ids
     uint256[NUM_TYPES] public itemIds;
@@ -95,6 +97,11 @@ contract GamePayment is ERC1155Holder {
         address indexed seller,
         uint256 indexed id,
         uint256 priceReceived
+    );
+
+    event ManagerSet(
+        address indexed previousManager,
+        address indexed newManager
     );
 
     event GatewaySet(
@@ -127,7 +134,7 @@ contract GamePayment is ERC1155Holder {
 
     // ----------------------------- constructor -----------------------------
 
-    constructor(address _usdc, address _items, address _gateway) {
+    constructor(address _usdc, address _items, address _gateway, address _manager) {
         require(_usdc != address(0), "Invalid USDC address");
         require(_items != address(0), "Invalid items address");
         require(_gateway != address(0), "Invalid gateway wallet address");
@@ -135,6 +142,7 @@ contract GamePayment is ERC1155Holder {
         usdc = IERC20(_usdc);
         items = GameItems(_items);
         gateway = IGatewayWallet(_gateway);
+        manager = Npc6551Manager(_manager);
         owner = msg.sender;
 
         itemIds[0] = items.MARKET_INTEL();
@@ -157,9 +165,7 @@ contract GamePayment is ERC1155Holder {
 
     /// @notice Rolls a random NFT type and charges the caller the current
     ///         bonding-curve buy price for that id.
-    function mintRandom(
-        uint256 maxPriceAllowed
-    ) external returns (uint256 id) {
+    function mintRandom(uint256 maxPriceAllowed) external returns (uint256 id) {
         id = _randomItemId();
 
         uint256 price = getBuyPrice(id);
@@ -294,6 +300,102 @@ contract GamePayment is ERC1155Holder {
 
     function getItemIds() external view returns (uint256[NUM_TYPES] memory) {
         return itemIds;
+    }
+
+    // ----------------------------- NPC TBA item reads -----------------------------
+
+    function setManager(address _manager) external onlyOwner {
+        address old = address(manager);
+        manager = Npc6551Manager(_manager);
+        emit ManagerSet(old, _manager);
+    }
+
+    /// @notice Obtain the TBA address for an NPC tokenId.
+    function npcTba(uint256 tokenId) public view returns (address) {
+        require(address(manager) != address(0), "Manager not set");
+        return manager.accountOf(tokenId);
+    }
+
+    /// @notice Balances held by `tba` for every managed item id.
+    ///         `ids` and `balances` are one-to-one aligned.
+    function getTbaItemBalances(
+        address tba
+    )
+        public
+        view
+        returns (
+            uint256[NUM_TYPES] memory ids,
+            uint256[NUM_TYPES] memory balances
+        )
+    {
+        address[] memory accounts = new address[](NUM_TYPES);
+        uint256[] memory idList = new uint256[](NUM_TYPES);
+        for (uint256 i = 0; i < NUM_TYPES; i++) {
+            ids[i] = itemIds[i];
+            accounts[i] = tba;
+            idList[i] = itemIds[i];
+        }
+
+        uint256[] memory bals = items.balanceOfBatch(accounts, idList);
+        for (uint256 i = 0; i < NUM_TYPES; i++) {
+            balances[i] = bals[i];
+        }
+    }
+
+    /// @notice Returns the TBA address plus all the NFT ids it actually holds and their balances.
+    function getTbaOwnedItems(
+        address tba
+    ) public view returns (uint256[] memory ids, uint256[] memory balances) {
+        (
+            uint256[NUM_TYPES] memory allIds,
+            uint256[NUM_TYPES] memory allBalances
+        ) = getTbaItemBalances(tba);
+
+        uint256 owned;
+        for (uint256 i = 0; i < NUM_TYPES; i++) {
+            if (allBalances[i] > 0) owned++;
+        }
+
+        ids = new uint256[](owned);
+        balances = new uint256[](owned);
+        uint256 j;
+        for (uint256 i = 0; i < NUM_TYPES; i++) {
+            if (allBalances[i] > 0) {
+                ids[j] = allIds[i];
+                balances[j] = allBalances[i];
+                j++;
+            }
+        }
+    }
+
+    /// @notice Resolve an NPC tokenId to its TBA and return that TBA's balance
+    ///         for every managed item id (aligned with `itemIds`).
+    function getNpcTbaItemBalances(
+        uint256 tokenId
+    )
+        external
+        view
+        returns (
+            address tba,
+            uint256[NUM_TYPES] memory ids,
+            uint256[NUM_TYPES] memory balances
+        )
+    {
+        tba = npcTba(tokenId);
+        (ids, balances) = getTbaItemBalances(tba);
+    }
+
+    /// @notice Resolve an NPC tokenId to its TBA and return only the item ids
+    ///         it holds (balance > 0) together with those balances.
+    function getNpcTbaOwnedItems(
+        uint256 tokenId
+    )
+        external
+        view
+        returns (address tba, uint256[] memory ids, uint256[] memory balances)
+    {
+        tba = npcTba(tokenId);
+        (ids, balances) = getTbaOwnedItems(tba);
     }
 
     function _randomItemId() private returns (uint256) {

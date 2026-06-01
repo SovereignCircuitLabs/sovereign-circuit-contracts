@@ -233,6 +233,24 @@ contract GamePayment is ERC1155Holder {
         emit ItemMinted(to, id, price);
     }
 
+    /// @notice Records that `amount` units of `id` entered circulation through
+    ///         the NPC manager (items minted directly into an NPC's TBA).
+    ///         Keeps the bonding-curve supply accounting in sync with these
+    ///         off-curve mints so pricing and buyback stay consistent.
+    /// @dev    Only callable by the configured manager — a contract cannot
+    ///         mutate another contract's storage, so the manager must route
+    ///         supply updates through here.
+    function recordManagerMint(uint256 id, uint256 amount) external {
+        require(msg.sender == address(manager), "Not manager");
+        require(_isManagedId(id), "Invalid id");
+        require(amount > 0, "Zero amount");
+
+        if (circulatingSupply[id] == 0) {
+            activeTypeCount += 1;
+        }
+        circulatingSupply[id] += amount;
+    }
+
     /// @notice Sells one NFT back to the contract.
     ///         The caller must first call setApprovalForAll on GameItems for this contract.
     ///         The buyback price is calculated via getSellPrice(id).

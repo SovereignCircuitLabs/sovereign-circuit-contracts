@@ -55,6 +55,20 @@ contract DeployNpc6551 is Script {
         npc.setMinter(address(manager), true);
         items.setMinter(address(manager), true);
 
+        // GamePayment Contract
+        address usdc = vm.envAddress("USDC_ADDRESS");
+        address gatewayAddr = vm.envAddress("GATEWAY_ADDRESS");
+        GamePayment payment = new GamePayment(
+            usdc,
+            address(items),
+            gatewayAddr,
+            address(manager)
+        );
+        // GamePayment mints items on buy/draw, so it needs minter rights.
+        items.setMinter(address(payment), true);
+
+        manager.setGamePayment(address(payment));
+
         // ---------- NPC #1: AggressiveTrader (Unity prefab: AggressiveTraderNpc) ----------
         NpcCharacter.PortfolioConfig memory aggressivePortfolio = NpcCharacter
             .PortfolioConfig({
@@ -136,18 +150,6 @@ contract DeployNpc6551 is Script {
         manager.mintItemToNpcTba(conservativeTokenId, items.RISK_REPORT(), 1);
         manager.mintItemToNpcTba(conservativeTokenId, items.ENERGY_PACK(), 1);
         manager.mintItemToNpcTba(conservativeTokenId, items.MARKET_INTEL(), 1);
-
-        // GamePayment Contract
-        address usdc = vm.envAddress("USDC_ADDRESS");
-        address gatewayAddr = vm.envAddress("GATEWAY_ADDRESS");
-        GamePayment payment = new GamePayment(
-            usdc,
-            address(items),
-            gatewayAddr,
-            address(manager)
-        );
-        // GamePayment mints items on buy/draw, so it needs minter rights.
-        items.setMinter(address(payment), true);
 
         vm.stopBroadcast();
 

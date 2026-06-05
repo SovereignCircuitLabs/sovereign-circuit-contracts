@@ -1,6 +1,7 @@
 # Compiler files
 cache/
 out/
+.claude/
 
 # Commonly ignored directories
 .logs/

@@ -3,13 +3,25 @@ pragma solidity ^0.8.20;
 
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
+import {
+    IERC721Receiver
+} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {
+    IERC1155Receiver
+} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
-import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+import {
+    SignatureChecker
+} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 
 import {IERC6551Account} from "./interfaces/IERC6551Account.sol";
 import {IERC6551Executable} from "./interfaces/IERC6551Executable.sol";
+
+interface INpcPaymentBinding {
+    function getPaymentBinding(
+        uint256 tokenId
+    ) external view returns (address wallet, uint64 version);
+}
 
 /// @title ERC6551Account
 /// @notice Token-bound account: control follows the bound ERC-721 token's owner.
@@ -63,11 +75,10 @@ contract ERC6551Account is
     }
 
     /// @inheritdoc IERC6551Account
-    function isValidSigner(address signer, bytes calldata)
-        external
-        view
-        returns (bytes4)
-    {
+    function isValidSigner(
+        address signer,
+        bytes calldata
+    ) external view returns (bytes4) {
         if (_isValidSigner(signer)) {
             return IERC6551Account.isValidSigner.selector;
         }
@@ -75,12 +86,15 @@ contract ERC6551Account is
     }
 
     /// @inheritdoc IERC1271
-    function isValidSignature(bytes32 hash, bytes memory signature)
-        external
-        view
-        returns (bytes4 magicValue)
-    {
-        bool ok = SignatureChecker.isValidSignatureNow(owner(), hash, signature);
+    function isValidSignature(
+        bytes32 hash,
+        bytes memory signature
+    ) external view returns (bytes4 magicValue) {
+        bool ok = SignatureChecker.isValidSignatureNow(
+            owner(),
+            hash,
+            signature
+        );
         if (ok) return IERC1271.isValidSignature.selector;
         return bytes4(0);
     }
@@ -115,31 +129,46 @@ contract ERC6551Account is
         return _state;
     }
 
+    // function _isValidSigner(address signer) internal view returns (bool) {
+    //     return signer != address(0) && signer == owner();
+    // }
+
     function _isValidSigner(address signer) internal view returns (bool) {
-        return signer != address(0) && signer == owner();
+        if (signer == address(0)) return false;
+        if (signer == owner()) return true;
+
+        // also allow paymentWallet as signer
+        (uint256 chainId, address tokenContract, uint256 tokenId) = token();
+        if (chainId != block.chainid) return false;
+        try
+            INpcPaymentBinding(tokenContract).getPaymentBinding(tokenId)
+        returns (address wallet, uint64 /*version*/) {
+            return wallet != address(0) && signer == wallet;
+        } catch {
+            return false;
+        }
     }
 
     // -------------- ERC165 --------------
-    function supportsInterface(bytes4 interfaceId)
-        external
-        pure
-        returns (bool)
-    {
+    function supportsInterface(
+        bytes4 interfaceId
+    ) external pure returns (bool) {
         return
             interfaceId == type(IERC165).interfaceId ||
             interfaceId == type(IERC1271).interfaceId ||
             interfaceId == type(IERC721Receiver).interfaceId ||
             interfaceId == type(IERC1155Receiver).interfaceId ||
             interfaceId == 0x6faff5f1 || // IERC6551Account
-            interfaceId == 0x51945447;   // IERC6551Executable
+            interfaceId == 0x51945447; // IERC6551Executable
     }
 
     // -------------- Token receiver hooks --------------
-    function onERC721Received(address, address, uint256, bytes calldata)
-        external
-        pure
-        returns (bytes4)
-    {
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    ) external pure returns (bytes4) {
         return IERC721Receiver.onERC721Received.selector;
     }
 

@@ -2,8 +2,8 @@
 pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {GamePayment} from "./GamePayment.sol";
-import {NpcCharacter} from "./npc/NpcCharacter.sol";
+import {GamePayment} from "../GamePayment.sol";
+import {NpcCharacter} from "./NpcCharacter.sol";
 
 /// @title NpcNFTPricing
 /// @notice Dynamic pricing module for NPC ERC-721s. It reads each NPC's ERC-6551

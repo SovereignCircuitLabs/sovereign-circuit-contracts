@@ -41,73 +41,15 @@ The contracts give every NPC a **dual on-chain identity** and a complete in-game
 | NPC marketplace       | `NpcNFTPricing` (TBA-value + scarcity) + `NpcMarketplace` (non-custodial)  |
 | Micropayments         | **Circle Gateway Wallet** integration (`IGatewayWallet`) for **x402** EIP-3009 settlement |
 
-### 3. Contract Architecture
+### 3. Contracts at a Glance
 
-```
-            ┌──────────────────────┐
-            │     NpcCharacter      │  ERC-721 identity + PortfolioConfig
-            │  (+ payment-wallet    │  + bindPaymentWallet / version reset on transfer
-            │     binding)          │
-            └───────────┬──────────┘
-                        │ owns 1:1
-            ┌───────────▼──────────┐      derive (salt=0, CREATE2)
-            │   ERC6551Registry    │──────────────► ERC6551Account (TBA)
-            └──────────────────────┘                holds USDC + ERC-1155
-                        ▲
-                        │ mint NPC + create TBA + mint items
-            ┌───────────┴──────────┐
-            │    Npc6551Manager     │  orchestration facade (minter only)
-            └───────┬───────┬──────┘
-                    │       │ recordManagerMint(id, amount)
-        mint items  │       ▼
-            ┌───────▼──────────────┐
-            │     GameItems         │  ERC-1155, 5 fixed item types
-            └───────────▲──────────┘
-                        │ mint on buy / sell buyback
-            ┌───────────┴──────────┐      deposit / withdraw / delegate
-            │     GamePayment       │──────────────► Circle Gateway Wallet (x402)
-            │  bonding-curve AMM    │
-            └───────────▲──────────┘
-                        │ reads TBA item + cash value
-            ┌───────────┴──────────┐
-            │    NpcNFTPricing      │  price = (base + TBA value) × scarcity(archetype)
-            └───────────▲──────────┘
-                        │ quote + listed-supply
-            ┌───────────┴──────────┐
-            │    NpcMarketplace     │  non-custodial NPC-NFT trading (USDC)
-            └──────────────────────┘
-```
-
-#### `src/npc/NpcCharacter.sol` — ERC-721 NPC identity
-- Three archetypes: `ConservativeSaver` / `BalancedTrader` / `AggressiveSpeculator`.
-- Stores a `PortfolioConfig` on-chain (budget weights in bps that must sum to `10000`, min living/reserve budgets, rebalance interval, action cooldown, min/max trade size) — a 1:1 mirror of Unity's `NpcPortfolioConfig`; the chain is the source of truth.
-- `mintNpc` (minter-gated), `updateAttributes` (minter: level/reputation), `updatePortfolio` (NFT-owner self-service retuning).
-- **x402 payment-wallet binding**: `bindPaymentWallet` / `clearPaymentWallet` (NFT owner only). On any transfer/burn, `_update` clears the bound wallet and **increments `npcPaymentVersion`** so off-chain caches and stale signatures are invalidated.
-
-#### `src/npc/GameItems.sol` — ERC-1155 items
-- Five fixed ids: `MARKET_INTEL=1`, `ENERGY_PACK=2`, `ACCESS_PASS=3`, `RISK_REPORT=4`, `SERVICE_VOUCHER=5` (fixed so the Unity client maps id → sprite statically).
-- Minter-gated `mint` / `mintBatch`; exposes `name` / `symbol` / `contractURI` for wallets & marketplaces.
-
-#### `src/erc6551/` — Token Bound Accounts
-- `ERC6551Registry` + `ERC6551Account` (reference implementation). Each NPC NFT deterministically maps to one TBA via `CREATE2` with a single game-wide `salt = 0`.
-- The account exposes `execute`, `token`, `owner`, `isValidSigner/Signature`, and ERC-721/1155 receiver hooks. Authority always belongs to the **current NFT owner** — selling the NFT hands over the TBA.
-
-#### `src/npc/Npc6551Manager.sol` — orchestration facade
-- `mintNpcAndAccount` (mint NFT + create TBA atomically), `ensureAccount` (idempotent TBA deploy), `mintItemToNpcTba` (server-driven item drops into a TBA), `accountOf` (view).
-- Routes off-curve mints into `GamePayment.recordManagerMint` so bonding-curve supply accounting stays consistent. Disable cleanly by removing it from the minter lists.
-
-#### `src/GamePayment.sol` — item AMM + Circle Gateway bridge
-- **Bonding curve** (USDC, 6 decimals): `buyPrice(id) = BASELINE_PRICE(0.10) + circulatingSupply[id] × PRICE_SLOPE(0.005)`, `sellPrice(id) = buyPrice × 95%` (`SELL_SPREAD_BPS`).
-- `mintRandom` (user pays curve price for a random item), `mintRandomX402` / `buyItemX402` (owner = trusted x402 relayer mints after off-chain settlement), `sellItem` (buyback into pool liquidity).
-- **Circle Gateway Wallet**: `depositToGateway` / `initiateGatewayWithdrawal` / `completeGatewayWithdrawal` / `add|removeGatewayDelegate`, plus balance views — funds the shared wallet that settles x402 nanopayments.
-- TBA item-balance read helpers (`getNpcTbaItemBalances`, `getNpcTbaOwnedItems`).
-
-#### `src/npc/NpcNFTPricing.sol` — dynamic NPC pricing
-- Per-archetype "class market" (classId = `archetype + 1`) with `basePrice`, `virtualLiquidity`, `maxMultiplierBps`, `scarcityWeightBps`.
-- `quoteNpcPrice(tokenId) = (basePrice + TBA total value) × scarcityMultiplier`, where TBA value = ERC-1155 sell value + USDC cash held by the TBA. Scarcity rises as listed supply shrinks (AMM-style), capped by `maxMultiplierBps`.
-
-#### `src/npc/NpcMarketplace.sol` — non-custodial NPC market
-- `listNpc` / `cancelListing` / `clearStaleListing` / `buyNpc`. NFTs stay in the seller's wallet (approval-based); `buyNpc` pulls the live `quoteNpcPrice`, settles USDC seller-ward, then transfers the NFT. Reentrancy-guarded; keeps `NpcNFTPricing.listedSupply` in sync.
+- **`NpcCharacter` (ERC-721)** — On-chain NPC identity that also stores the strategy `PortfolioConfig` and can bind an x402 payment wallet; the binding auto-clears on NFT transfer.
+- **`GameItems` (ERC-1155)** — Five fixed game-item types (MarketIntel / EnergyPack / AccessPass / RiskReport / ServiceVoucher), minter-gated minting.
+- **`erc6551/` (ERC6551Registry + ERC6551Account)** — Deterministically derives one TBA smart-contract wallet per NPC NFT (`CREATE2`, fixed salt=0) to custody its USDC and items; control follows the NFT.
+- **`Npc6551Manager`** — Orchestration facade that mints the NFT, creates the TBA, and mints items into it in one call.
+- **`GamePayment`** — Bonding-curve AMM for items (buy/sell/buyback) plus a Circle Gateway Wallet bridge that funds x402 nanopayments.
+- **`NpcNFTPricing`** — Quotes each NPC's price from its TBA net worth and an archetype scarcity multiplier.
+- **`NpcMarketplace`** — Non-custodial NPC-NFT trading settled in USDC.
 
 ### 4. Deployment
 
@@ -201,72 +143,15 @@ Each script's `run()` reads `PRIVATE_KEY`, `USDC_ADDRESS`, `GATEWAY_ADDRESS` fro
 | NPC 交易所      | `NpcNFTPricing`（TBA 净值 + 稀缺度）+ `NpcMarketplace`（非托管）            |
 | 微支付          | 集成 **Circle Gateway Wallet**（`IGatewayWallet`）完成 **x402** EIP-3009 结算 |
 
-### 3. 合约架构
+### 3. 合约一览
 
-```
-            ┌──────────────────────┐
-            │     NpcCharacter      │  ERC-721 身份 + PortfolioConfig
-            │  （+ 支付钱包绑定）    │  + bindPaymentWallet / 转移时 version 重置
-            └───────────┬──────────┘
-                        │ 1:1 拥有
-            ┌───────────▼──────────┐      派生（salt=0, CREATE2）
-            │   ERC6551Registry    │──────────────► ERC6551Account (TBA)
-            └──────────────────────┘                持有 USDC + ERC-1155
-                        ▲
-                        │ 铸造 NPC + 创建 TBA + 铸造道具
-            ┌───────────┴──────────┐
-            │    Npc6551Manager     │  编排门面（仅 minter）
-            └───────┬───────┬──────┘
-                    │       │ recordManagerMint(id, amount)
-          铸造道具  │       ▼
-            ┌───────▼──────────────┐
-            │     GameItems         │  ERC-1155,5 种固定道具
-            └───────────▲──────────┘
-                        │ 购买时铸造 / 回购
-            ┌───────────┴──────────┐      deposit / withdraw / delegate
-            │     GamePayment       │──────────────► Circle Gateway Wallet (x402)
-            │   联合曲线 AMM        │
-            └───────────▲──────────┘
-                        │ 读取 TBA 道具 + 现金净值
-            ┌───────────┴──────────┐
-            │    NpcNFTPricing      │  价格 = (base + TBA 净值) × 稀缺度(archetype)
-            └───────────▲──────────┘
-                        │ 报价 + 在售供给
-            ┌───────────┴──────────┐
-            │    NpcMarketplace     │  非托管 NPC-NFT 交易（USDC）
-            └──────────────────────┘
-```
-
-#### `src/npc/NpcCharacter.sol` — ERC-721 NPC 身份
-- 三种原型：`ConservativeSaver` / `BalancedTrader` / `AggressiveSpeculator`。
-- 链上保存 `PortfolioConfig`（预算权重 bps,三者必须和为 `10000`；最低生活/储备预算；重平衡间隔；操作冷却；最小/最大交易额）——与 Unity 的 `NpcPortfolioConfig` 1:1 对应,链上为唯一事实来源。
-- `mintNpc`（minter 限定）、`updateAttributes`（minter：等级/声誉）、`updatePortfolio`（NFT 持有人自助重调参数）。
-- **x402 支付钱包绑定**：`bindPaymentWallet` / `clearPaymentWallet`（仅 NFT 持有人）。任何转移/销毁时 `_update` 会清空已绑定钱包并**自增 `npcPaymentVersion`**,使链下缓存与旧签名失效。
-
-#### `src/npc/GameItems.sol` — ERC-1155 道具
-- 五种固定 id：`MARKET_INTEL=1`、`ENERGY_PACK=2`、`ACCESS_PASS=3`、`RISK_REPORT=4`、`SERVICE_VOUCHER=5`（固定以便 Unity 静态映射 id → 贴图）。
-- minter 限定的 `mint` / `mintBatch`；暴露 `name` / `symbol` / `contractURI` 供钱包与交易市场展示。
-
-#### `src/erc6551/` — Token Bound Accounts
-- `ERC6551Registry` + `ERC6551Account`（参考实现）。每个 NPC NFT 通过 `CREATE2` 配合全局唯一 `salt = 0` 确定性映射到一个 TBA。
-- 账户暴露 `execute`、`token`、`owner`、`isValidSigner/Signature` 及 ERC-721/1155 接收钩子。控制权始终归**当前 NFT 持有人**——卖出 NFT 即移交 TBA。
-
-#### `src/npc/Npc6551Manager.sol` — 编排门面
-- `mintNpcAndAccount`（原子地铸 NFT + 创建 TBA）、`ensureAccount`（幂等部署 TBA）、`mintItemToNpcTba`（服务端把道具直接铸进 TBA）、`accountOf`（view）。
-- 把曲线外的铸造经由 `GamePayment.recordManagerMint` 上报,保持联合曲线供给账目一致。把它从各 minter 列表移除即可干净停用。
-
-#### `src/GamePayment.sol` — 道具 AMM + Circle Gateway 桥
-- **联合曲线**（USDC,6 位小数）：`buyPrice(id) = BASELINE_PRICE(0.10) + circulatingSupply[id] × PRICE_SLOPE(0.005)`,`sellPrice(id) = buyPrice × 95%`（`SELL_SPREAD_BPS`）。
-- `mintRandom`（用户按曲线价购随机道具）、`mintRandomX402` / `buyItemX402`（owner = 受信任的 x402 relayer,在链下结算后铸造）、`sellItem`（按池内流动性回购）。
-- **Circle Gateway Wallet**：`depositToGateway` / `initiateGatewayWithdrawal` / `completeGatewayWithdrawal` / `add|removeGatewayDelegate` 及余额查询——为结算 x402 微支付的共享钱包注资。
-- TBA 道具余额读取助手（`getNpcTbaItemBalances`、`getNpcTbaOwnedItems`）。
-
-#### `src/npc/NpcNFTPricing.sol` — 动态 NPC 定价
-- 按原型划分的「class market」（classId = `archetype + 1`）,含 `basePrice`、`virtualLiquidity`、`maxMultiplierBps`、`scarcityWeightBps`。
-- `quoteNpcPrice(tokenId) = (basePrice + TBA 净值) × 稀缺度乘数`,其中 TBA 净值 = ERC-1155 回购价值 + TBA 持有的 USDC。在售供给越少稀缺度越高（AMM 风格）,上限为 `maxMultiplierBps`。
-
-#### `src/npc/NpcMarketplace.sol` — 非托管 NPC 市场
-- `listNpc` / `cancelListing` / `clearStaleListing` / `buyNpc`。NFT 留在卖家钱包（基于授权）；`buyNpc` 取实时 `quoteNpcPrice`,先把 USDC 结给卖家再转移 NFT。带重入保护,并保持 `NpcNFTPricing.listedSupply` 同步。
+- **`NpcCharacter`（ERC-721）** — NPC 链上身份,链上保存策略参数 `PortfolioConfig`,并可绑定 x402 支付钱包;NFT 转移时自动清空绑定。
+- **`GameItems`（ERC-1155）** — 5 种固定游戏道具(情报/能量/通行证/风控报告/服务券),minter 限定铸造。
+- **`erc6551/`（ERC6551Registry + ERC6551Account）** — 每个 NPC NFT 经 `CREATE2`(固定 salt=0)确定性派生一个 TBA 智能合约钱包,托管其 USDC 与道具,控制权随 NFT 转移。
+- **`Npc6551Manager`** — 编排门面,一步完成「铸 NFT + 建 TBA + 向 TBA 铸道具」。
+- **`GamePayment`** — 道具联合曲线 AMM(买/卖/回购),并桥接 Circle Gateway Wallet 为 x402 微支付注资。
+- **`NpcNFTPricing`** — 按 NPC 的 TBA 净值 + 原型稀缺度动态报价。
+- **`NpcMarketplace`** — 非托管 NPC-NFT 交易,USDC 结算。
 
 ### 4. 部署教程
 
@@ -360,72 +245,15 @@ forge script script/DeployNpc6551Market.s.sol:DeployNpc6551Market \
 | NPC 交易所      | `NpcNFTPricing`（TBA 淨值 + 稀缺度）+ `NpcMarketplace`（非託管）            |
 | 微支付          | 整合 **Circle Gateway Wallet**（`IGatewayWallet`）完成 **x402** EIP-3009 結算 |
 
-### 3. 合約架構
+### 3. 合約一覽
 
-```
-            ┌──────────────────────┐
-            │     NpcCharacter      │  ERC-721 身份 + PortfolioConfig
-            │  （+ 支付錢包綁定）    │  + bindPaymentWallet / 轉移時 version 重置
-            └───────────┬──────────┘
-                        │ 1:1 擁有
-            ┌───────────▼──────────┐      派生（salt=0, CREATE2）
-            │   ERC6551Registry    │──────────────► ERC6551Account (TBA)
-            └──────────────────────┘                持有 USDC + ERC-1155
-                        ▲
-                        │ 鑄造 NPC + 建立 TBA + 鑄造道具
-            ┌───────────┴──────────┐
-            │    Npc6551Manager     │  編排門面（僅 minter）
-            └───────┬───────┬──────┘
-                    │       │ recordManagerMint(id, amount)
-          鑄造道具  │       ▼
-            ┌───────▼──────────────┐
-            │     GameItems         │  ERC-1155,5 種固定道具
-            └───────────▲──────────┘
-                        │ 購買時鑄造 / 回購
-            ┌───────────┴──────────┐      deposit / withdraw / delegate
-            │     GamePayment       │──────────────► Circle Gateway Wallet (x402)
-            │   聯合曲線 AMM        │
-            └───────────▲──────────┘
-                        │ 讀取 TBA 道具 + 現金淨值
-            ┌───────────┴──────────┐
-            │    NpcNFTPricing      │  價格 = (base + TBA 淨值) × 稀缺度(archetype)
-            └───────────▲──────────┘
-                        │ 報價 + 在售供給
-            ┌───────────┴──────────┐
-            │    NpcMarketplace     │  非託管 NPC-NFT 交易（USDC）
-            └──────────────────────┘
-```
-
-#### `src/npc/NpcCharacter.sol` — ERC-721 NPC 身份
-- 三種原型：`ConservativeSaver` / `BalancedTrader` / `AggressiveSpeculator`。
-- 鏈上保存 `PortfolioConfig`（預算權重 bps,三者必須和為 `10000`；最低生活/儲備預算；重平衡間隔；操作冷卻；最小/最大交易額）——與 Unity 的 `NpcPortfolioConfig` 1:1 對應,鏈上為唯一事實來源。
-- `mintNpc`（minter 限定）、`updateAttributes`（minter：等級/聲譽）、`updatePortfolio`（NFT 持有人自助重調參數）。
-- **x402 支付錢包綁定**：`bindPaymentWallet` / `clearPaymentWallet`（僅 NFT 持有人）。任何轉移/銷毀時 `_update` 會清空已綁定錢包並**自增 `npcPaymentVersion`**,使鏈下快取與舊簽名失效。
-
-#### `src/npc/GameItems.sol` — ERC-1155 道具
-- 五種固定 id：`MARKET_INTEL=1`、`ENERGY_PACK=2`、`ACCESS_PASS=3`、`RISK_REPORT=4`、`SERVICE_VOUCHER=5`（固定以便 Unity 靜態映射 id → 貼圖）。
-- minter 限定的 `mint` / `mintBatch`；暴露 `name` / `symbol` / `contractURI` 供錢包與交易市場顯示。
-
-#### `src/erc6551/` — Token Bound Accounts
-- `ERC6551Registry` + `ERC6551Account`（參考實作）。每個 NPC NFT 透過 `CREATE2` 搭配全域唯一 `salt = 0` 確定性映射到一個 TBA。
-- 帳戶暴露 `execute`、`token`、`owner`、`isValidSigner/Signature` 及 ERC-721/1155 接收掛鉤。控制權始終歸**當前 NFT 持有人**——賣出 NFT 即移交 TBA。
-
-#### `src/npc/Npc6551Manager.sol` — 編排門面
-- `mintNpcAndAccount`（原子地鑄 NFT + 建立 TBA）、`ensureAccount`（冪等部署 TBA）、`mintItemToNpcTba`（伺服端把道具直接鑄進 TBA）、`accountOf`（view）。
-- 把曲線外的鑄造經由 `GamePayment.recordManagerMint` 上報,保持聯合曲線供給帳目一致。把它從各 minter 列表移除即可乾淨停用。
-
-#### `src/GamePayment.sol` — 道具 AMM + Circle Gateway 橋
-- **聯合曲線**（USDC,6 位小數）：`buyPrice(id) = BASELINE_PRICE(0.10) + circulatingSupply[id] × PRICE_SLOPE(0.005)`,`sellPrice(id) = buyPrice × 95%`（`SELL_SPREAD_BPS`）。
-- `mintRandom`（使用者依曲線價購隨機道具）、`mintRandomX402` / `buyItemX402`（owner = 受信任的 x402 relayer,在鏈下結算後鑄造）、`sellItem`（依池內流動性回購）。
-- **Circle Gateway Wallet**：`depositToGateway` / `initiateGatewayWithdrawal` / `completeGatewayWithdrawal` / `add|removeGatewayDelegate` 及餘額查詢——為結算 x402 微支付的共享錢包注資。
-- TBA 道具餘額讀取輔助（`getNpcTbaItemBalances`、`getNpcTbaOwnedItems`）。
-
-#### `src/npc/NpcNFTPricing.sol` — 動態 NPC 定價
-- 依原型劃分的「class market」（classId = `archetype + 1`）,含 `basePrice`、`virtualLiquidity`、`maxMultiplierBps`、`scarcityWeightBps`。
-- `quoteNpcPrice(tokenId) = (basePrice + TBA 淨值) × 稀缺度乘數`,其中 TBA 淨值 = ERC-1155 回購價值 + TBA 持有的 USDC。在售供給越少稀缺度越高（AMM 風格）,上限為 `maxMultiplierBps`。
-
-#### `src/npc/NpcMarketplace.sol` — 非託管 NPC 市場
-- `listNpc` / `cancelListing` / `clearStaleListing` / `buyNpc`。NFT 留在賣家錢包（基於授權）；`buyNpc` 取即時 `quoteNpcPrice`,先把 USDC 結給賣家再轉移 NFT。帶重入保護,並保持 `NpcNFTPricing.listedSupply` 同步。
+- **`NpcCharacter`（ERC-721）** — NPC 鏈上身份,鏈上保存策略參數 `PortfolioConfig`,並可綁定 x402 支付錢包;NFT 轉移時自動清空綁定。
+- **`GameItems`（ERC-1155）** — 5 種固定遊戲道具(情報/能量/通行證/風控報告/服務券),minter 限定鑄造。
+- **`erc6551/`（ERC6551Registry + ERC6551Account）** — 每個 NPC NFT 經 `CREATE2`(固定 salt=0)確定性派生一個 TBA 智能合約錢包,託管其 USDC 與道具,控制權隨 NFT 轉移。
+- **`Npc6551Manager`** — 編排門面,一步完成「鑄 NFT + 建 TBA + 向 TBA 鑄道具」。
+- **`GamePayment`** — 道具聯合曲線 AMM(買/賣/回購),並橋接 Circle Gateway Wallet 為 x402 微支付注資。
+- **`NpcNFTPricing`** — 依 NPC 的 TBA 淨值 + 原型稀缺度動態報價。
+- **`NpcMarketplace`** — 非託管 NPC-NFT 交易,USDC 結算。
 
 ### 4. 部署教學
 

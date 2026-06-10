@@ -3,9 +3,9 @@
 **Language / 语言 / 語言**:
 [English](#english) ｜ [简体中文](#简体中文) ｜ [繁體中文](#繁體中文)
 
-- Unity Client: https://github.com/NPCs-Agent-Economy-System/Arc-Chain-Economy-System
-- Smart Contracts (this repo): Arc-Chain-Game-Payment
-- x402 Seller Server: https://github.com/NPCs-Agent-Economy-System/Arc-Chain-x402-Seller
+- Unity Client: https://github.com/SovereignCircuitLabs/sovereign-circuit-unity
+- Smart Contracts (this repo): https://github.com/SovereignCircuitLabs/sovereign-circuit-contracts
+- x402 Seller Server: https://github.com/SovereignCircuitLabs/sovereign-circuit-server
 
 ---
 

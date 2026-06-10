@@ -77,10 +77,6 @@ ARC_TESTNET_RPC_URL="https://rpc.testnet.arc.network"
 PRIVATE_KEY="0x<deployer-private-key>"
 USDC_ADDRESS="0x<usdc-on-arc>"
 GATEWAY_ADDRESS="0x<circle-gateway-wallet-on-arc>"
-
-# optional — reuse an already-deployed ERC-6551 registry singleton:
-# USE_CANONICAL_REGISTRY=true
-# CANONICAL_REGISTRY=0x<registry-address>
 ```
 ```bash
 source .env
@@ -97,8 +93,8 @@ source .env
 ```bash
 # Full marketplace deployment (recommended):
 forge script script/DeployNpc6551Market.s.sol:DeployNpc6551Market \
-  --rpc-url "$ARC_TESTNET_RPC_URL" \
-  --broadcast -vvvv
+--rpc-url $ARC_TESTNET_RPC_URL --private-key $PRIVATE_KEY \
+--via-ir --broadcast --slow
 ```
 Each script's `run()` reads `PRIVATE_KEY`, `USDC_ADDRESS`, `GATEWAY_ADDRESS` from the environment and prints every deployed address (NPC ERC-721, registry, account impl, GameItems, Npc6551Manager, GamePayment, NpcNFTPricing, NpcMarketplace, plus the minted tokenIds / TBAs) in the final summary. Save these.
 
@@ -179,10 +175,6 @@ ARC_TESTNET_RPC_URL="https://rpc.testnet.arc.network"
 PRIVATE_KEY="0x<部署者私钥>"
 USDC_ADDRESS="0x<Arc 上的 USDC>"
 GATEWAY_ADDRESS="0x<Arc 上的 Circle Gateway Wallet>"
-
-# 可选 —— 复用已部署的 ERC-6551 registry 单例：
-# USE_CANONICAL_REGISTRY=true
-# CANONICAL_REGISTRY=0x<registry 地址>
 ```
 ```bash
 source .env
@@ -199,8 +191,8 @@ source .env
 ```bash
 # 完整交易所部署（推荐）：
 forge script script/DeployNpc6551Market.s.sol:DeployNpc6551Market \
-  --rpc-url "$ARC_TESTNET_RPC_URL" \
-  --broadcast -vvvv
+--rpc-url $ARC_TESTNET_RPC_URL --private-key $PRIVATE_KEY \
+--via-ir --broadcast --slow
 ```
 每个脚本的 `run()` 会从环境读取 `PRIVATE_KEY`、`USDC_ADDRESS`、`GATEWAY_ADDRESS`,并在结尾打印所有已部署地址（NPC ERC-721、registry、account 实现、GameItems、Npc6551Manager、GamePayment、NpcNFTPricing、NpcMarketplace,以及铸出的 tokenId / TBA）。请妥善保存。
 
@@ -281,10 +273,6 @@ ARC_TESTNET_RPC_URL="https://rpc.testnet.arc.network"
 PRIVATE_KEY="0x<部署者私鑰>"
 USDC_ADDRESS="0x<Arc 上的 USDC>"
 GATEWAY_ADDRESS="0x<Arc 上的 Circle Gateway Wallet>"
-
-# 可選 —— 複用已部署的 ERC-6551 registry 單例：
-# USE_CANONICAL_REGISTRY=true
-# CANONICAL_REGISTRY=0x<registry 位址>
 ```
 ```bash
 source .env
@@ -301,8 +289,8 @@ source .env
 ```bash
 # 完整交易所部署（推薦）：
 forge script script/DeployNpc6551Market.s.sol:DeployNpc6551Market \
-  --rpc-url "$ARC_TESTNET_RPC_URL" \
-  --broadcast -vvvv
+--rpc-url $ARC_TESTNET_RPC_URL --private-key $PRIVATE_KEY \
+--via-ir --broadcast --slow
 ```
 每個腳本的 `run()` 會從環境讀取 `PRIVATE_KEY`、`USDC_ADDRESS`、`GATEWAY_ADDRESS`,並在結尾印出所有已部署位址（NPC ERC-721、registry、account 實作、GameItems、Npc6551Manager、GamePayment、NpcNFTPricing、NpcMarketplace,以及鑄出的 tokenId / TBA）。請妥善保存。
 

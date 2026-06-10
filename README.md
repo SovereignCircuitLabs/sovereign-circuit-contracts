@@ -1,4 +1,4 @@
-# Arc-Chain-Economy-System — Smart Contracts
+# Sovereign Circuit — Smart Contracts
 
 **Language / 语言 / 語言**:
 [English](#english) ｜ [简体中文](#简体中文) ｜ [繁體中文](#繁體中文)

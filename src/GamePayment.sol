@@ -109,6 +109,7 @@ contract GamePayment is ERC1155Holder {
         address indexed newGateway
     );
     event GatewayDeposited(address indexed gateway, uint256 amount);
+    event RefundedToGateway(address indexed buyer, uint256 amount);
     event GatewayWithdrawalInitiated(address indexed gateway, uint256 amount);
     event GatewayWithdrawalCompleted(address indexed gateway);
     event GatewayDelegateAdded(
@@ -231,6 +232,33 @@ contract GamePayment is ERC1155Holder {
         items.mint(to, id, 1, "");
 
         emit ItemMinted(to, id, price);
+    }
+
+    /// @notice Called by the trusted x402 relayer(server) to refund `amount`
+    ///         USDC base units back into `buyer`'s Circle Gateway balance, used
+    ///         when an order fails after the buyer's payment already settled
+    ///         into this contract (e.g. the buyItemX402 mint reverted).
+    /// @dev    Refunding via depositFor credits the buyer's Gateway available
+    ///         balance directly — so the buyer can immediately fund the next
+    ///         x402 payment or withdraw() back to their EOA, which fits the NPC
+    ///         economy better than returning to the EOA. Pays out of the
+    ///         contract's USDC pool, so callers must ensure the failed payment
+    ///         actually landed here before refunding.
+    function refundToGateway(
+        address buyer,
+        uint256 amount
+    ) external onlyOwner gatewayConfigured {
+        require(buyer != address(0), "Invalid buyer");
+        require(amount > 0, "Invalid amount");
+        require(
+            usdc.balanceOf(address(this)) >= amount,
+            "Insufficient contract USDC"
+        );
+
+        usdc.forceApprove(address(gateway), amount);
+        gateway.depositFor(address(usdc), buyer, amount);
+
+        emit RefundedToGateway(buyer, amount);
     }
 
     /// @notice Records that `amount` units of `id` entered circulation through

@@ -172,7 +172,7 @@ contract DeployNpc6551Market is Script {
             (tokenIds[0], tbas[0]) = manager.mintNpcAndAccount(deployer, d);
             manager.mintItemToNpcTba(tokenIds[0], items.RISK_REPORT(), 2);
             manager.mintItemToNpcTba(tokenIds[0], items.ENERGY_PACK(), 1);
-            minPrices[0] = 400_000; // 0.40 USDC
+            minPrices[0] = 0; // no reserve price — always sells at market quote
         }
 
         // ---- #2 ConservativeSaver — "MerchantDahlia" ----
@@ -199,7 +199,7 @@ contract DeployNpc6551Market is Script {
             (tokenIds[1], tbas[1]) = manager.mintNpcAndAccount(deployer, d);
             manager.mintItemToNpcTba(tokenIds[1], items.RISK_REPORT(), 1);
             manager.mintItemToNpcTba(tokenIds[1], items.ACCESS_PASS(), 1);
-            minPrices[1] = 450_000; // 0.45 USDC
+            minPrices[1] = 0; // no reserve price — always sells at market quote
         }
 
         // ---- #3 BalancedTrader — "MerchantBalin" ----
@@ -226,7 +226,7 @@ contract DeployNpc6551Market is Script {
             (tokenIds[2], tbas[2]) = manager.mintNpcAndAccount(deployer, d);
             manager.mintItemToNpcTba(tokenIds[2], items.ACCESS_PASS(), 1);
             manager.mintItemToNpcTba(tokenIds[2], items.SERVICE_VOUCHER(), 2);
-            minPrices[2] = 900_000; // 0.90 USDC
+            minPrices[2] = 0; // no reserve price — always sells at market quote
         }
 
         // ---- #4 BalancedTrader — "MerchantElara" ----
@@ -253,7 +253,7 @@ contract DeployNpc6551Market is Script {
             (tokenIds[3], tbas[3]) = manager.mintNpcAndAccount(deployer, d);
             manager.mintItemToNpcTba(tokenIds[3], items.MARKET_INTEL(), 1);
             manager.mintItemToNpcTba(tokenIds[3], items.SERVICE_VOUCHER(), 1);
-            minPrices[3] = 1_000_000; // 1.00 USDC
+            minPrices[3] = 0; // no reserve price — always sells at market quote
         }
 
         // ---- #5 AggressiveSpeculator — "MerchantAragon" ----
@@ -280,7 +280,7 @@ contract DeployNpc6551Market is Script {
             (tokenIds[4], tbas[4]) = manager.mintNpcAndAccount(deployer, d);
             manager.mintItemToNpcTba(tokenIds[4], items.MARKET_INTEL(), 2);
             manager.mintItemToNpcTba(tokenIds[4], items.ENERGY_PACK(), 1);
-            minPrices[4] = 1_800_000; // 1.80 USDC
+            minPrices[4] = 0; // no reserve price — always sells at market quote
         }
 
         // ---- #6 AggressiveSpeculator — "MerchantFenn" ----
@@ -307,7 +307,7 @@ contract DeployNpc6551Market is Script {
             (tokenIds[5], tbas[5]) = manager.mintNpcAndAccount(deployer, d);
             manager.mintItemToNpcTba(tokenIds[5], items.MARKET_INTEL(), 3);
             manager.mintItemToNpcTba(tokenIds[5], items.ENERGY_PACK(), 2);
-            minPrices[5] = 2_000_000; // 2.00 USDC
+            minPrices[5] = 0; // no reserve price — always sells at market quote
         }
 
         // ---------- Approve marketplace & list all 6 ----------
